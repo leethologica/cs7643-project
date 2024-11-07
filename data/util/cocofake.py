@@ -25,7 +25,7 @@ class CocoFake(torch.utils.data.Dataset):
 
         self.real_images = sorted(os.listdir(self.coco_path))[:limit]
         if test_split is not None:
-            n = len(self.real_images) // 2
+            n = int(len(self.real_images) * test_split)
             if split == "test":
                 self.real_images = self.real_images[n:]
             else:
