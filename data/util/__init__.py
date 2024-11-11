@@ -1,0 +1,1 @@
+from .cocofake import get_cocofake

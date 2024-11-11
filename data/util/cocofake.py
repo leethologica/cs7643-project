@@ -30,7 +30,8 @@ class CocoFake(torch.utils.data.Dataset):
                 self.real_images = self.real_images[n:]
             else:
                 self.real_images = self.real_images[:n]
-        self.transforms = transforms
+        self.real_transform = real_transform
+        self.fake_transform = fake_transform
 
     def __len__(self):
         return len(self.real_images)
@@ -61,7 +62,8 @@ class CocoFake(torch.utils.data.Dataset):
 def get_cocofake(
     coco_path,
     cocofake_path,
-    transforms=None,
+    real_transform=None,
+    fake_transform=None,
     batch_size=1,
     train_limit=-1,
     val_limit=-1,
@@ -102,9 +104,9 @@ def get_cocofake(
 
     assert os.path.exists(cocofake_path)
 
-    train = CocoFake(coco_path, cocofake_path, transforms=transforms, split="train", limit=train_limit)
-    val = CocoFake(coco_path, cocofake_path, transforms=transforms, split="val", limit=val_limit, test_split=test_split)
-    test = CocoFake(coco_path, cocofake_path, transforms=transforms, split="test", limit=val_limit, test_split=test_split)
+    train = CocoFake(coco_path, cocofake_path, real_transform=real_transform, fake_transform=fake_transform, split="train", limit=train_limit)
+    val = CocoFake(coco_path, cocofake_path, real_transform=real_transform, fake_transform=fake_transform, split="val", limit=val_limit, test_split=test_split)
+    test = CocoFake(coco_path, cocofake_path, real_transform=real_transform, fake_transform=fake_transform, split="test", limit=val_limit, test_split=test_split)
 
     train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size)
     val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size)
