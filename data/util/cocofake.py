@@ -39,12 +39,10 @@ class CocoFake(torch.utils.data.Dataset):
     def __getitem__(self, index):
         path = os.path.join(self.coco_path, self.real_images[index])
         img_id = os.path.basename(path).split(".")[0]
-        real_image = np.array(Image.open(path))
-        if len(real_image.shape) != 3:
-            real_image = np.array(Image.open(path).convert("RGB"))
+        real_image = Image.open(path).convert("RGB")
         fake_image_paths = sorted(os.listdir(os.path.join(self.cocofake_path, img_id)))
         fake_images = [
-            np.array(Image.open(os.path.join(self.cocofake_path, img_id, x)))
+            Image.open(os.path.join(self.cocofake_path, img_id, x))
             for x in fake_image_paths
         ]
 
@@ -53,8 +51,10 @@ class CocoFake(torch.utils.data.Dataset):
         if self.fake_transform is not None:
             fake_images = [self.fake_transform(x) for x in fake_images]
 
-        real_image = np.transpose(real_image, (2, 0, 1)).astype(np.float32)
-        fake_images = [np.transpose(x, (2, 0, 1)).astype(np.float32) for x in fake_images]
+        #real_image = np.transpose(real_image, (2, 0, 1)).astype(np.float32)
+        #fake_images = [np.transpose(x, (2, 0, 1)).astype(np.float32) for x in fake_images]
+        if len(fake_images) > 5:
+            fake_images = fake_images[0:5]
 
         return {"real": real_image, "fake": fake_images}
 
@@ -68,6 +68,8 @@ def get_cocofake(
     train_limit=-1,
     val_limit=-1,
     test_split=0.5,
+    train_n_workers=0,
+    val_n_workers=0
 ):
     """
     Retrieve train, validation, and test dataloaders.
@@ -108,8 +110,8 @@ def get_cocofake(
     val = CocoFake(coco_path, cocofake_path, real_transform=val_transform, fake_transform=val_transform, split="val", limit=val_limit, test_split=test_split)
     test = CocoFake(coco_path, cocofake_path, real_transform=val_transform, fake_transform=val_transform, split="test", limit=val_limit, test_split=test_split)
 
-    train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size)
-    val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size)
+    train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size, num_workers=train_n_workers)
+    val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size, num_workers=val_n_workers)
     test_dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size)
 
     return train_dataloader, val_dataloader, test_dataloader
