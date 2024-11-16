@@ -15,6 +15,7 @@ class CocoFake(torch.utils.data.Dataset):
         split="train",
         limit=-1,
         test_split=None,
+        num_fake=5,
     ):
         if split == "test" or split == "val":
             self.cocofake_path = os.path.join(cocofake_path, "val2014")
@@ -30,7 +31,11 @@ class CocoFake(torch.utils.data.Dataset):
                 self.real_images = self.real_images[n:]
             else:
                 self.real_images = self.real_images[:n]
-        self.transforms = transforms
+        self.real_transform = real_transform
+        self.fake_transform = fake_transform
+        self.num_fake = num_fake
+        if num_fake < 1 or num_fake > 5:
+            raise ValueError("`num_fake` must be between 1 and 5")
 
     def __len__(self):
         return len(self.real_images)
@@ -45,27 +50,34 @@ class CocoFake(torch.utils.data.Dataset):
         fake_images = [
             np.array(Image.open(os.path.join(self.cocofake_path, img_id, x)))
             for x in fake_image_paths
-        ]
+        ][:5]
+
+        real_image = torch.tensor(np.transpose(real_image, (2, 0, 1)).astype(np.float32))
+        fake_images = [torch.tensor(np.transpose(x, (2, 0, 1)).astype(np.float32)) for x in fake_images]
 
         if self.real_transform is not None:
             real_image = self.real_transform(real_image)
         if self.fake_transform is not None:
-            fake_images = [self.fake_transform(x) for x in fake_images]
+            fake_images = [self.fake_transform(x) for x in fake_images][:num_fake]
 
-        real_image = np.transpose(real_image, (2, 0, 1)).astype(np.float32)
-        fake_images = [np.transpose(x, (2, 0, 1)).astype(np.float32) for x in fake_images]
-
+        if len(fake_images) != 5:
+            print(img_id)
+            assert False
         return {"real": real_image, "fake": fake_images}
 
 
 def get_cocofake(
     coco_path,
     cocofake_path,
-    transforms=None,
+    real_transform=None,
+    fake_transform=None,
     batch_size=1,
     train_limit=-1,
     val_limit=-1,
     test_split=0.5,
+    train_n_workers=1,
+    val_n_workers=1,
+    num_fake=5,
 ):
     """
     Retrieve train, validation, and test dataloaders.
@@ -102,13 +114,22 @@ def get_cocofake(
 
     assert os.path.exists(cocofake_path)
 
-    train = CocoFake(coco_path, cocofake_path, transforms=transforms, split="train", limit=train_limit)
-    val = CocoFake(coco_path, cocofake_path, transforms=transforms, split="val", limit=val_limit, test_split=test_split)
-    test = CocoFake(coco_path, cocofake_path, transforms=transforms, split="test", limit=val_limit, test_split=test_split)
+    train = CocoFake(
+        coco_path, cocofake_path, real_transform=real_transform, fake_transform=fake_transform,
+        split="train", limit=train_limit, num_fake=num_fake
+    )
+    val = CocoFake(
+        coco_path, cocofake_path, real_transform=real_transform, fake_transform=fake_transform,
+        split="val", limit=val_limit, test_split=test_split, num_fake=num_fake
+    )
+    test = CocoFake(
+        coco_path, cocofake_path, real_transform=real_transform, fake_transform=fake_transform,
+        split="test", limit=val_limit, test_split=test_split, num_fake=num_fake
+    )
 
-    train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size)
-    val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size)
-    test_dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size)
+    train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size, num_workers=train_n_workers)
+    val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size, num_workers=val_n_workers)
+    test_dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, num_workers=val_n_workers)
 
     return train_dataloader, val_dataloader, test_dataloader
 
