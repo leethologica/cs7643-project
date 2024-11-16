@@ -41,22 +41,14 @@ class CocoFake(torch.utils.data.Dataset):
         img_id = os.path.basename(path).split(".")[0]
         real_image = Image.open(path).convert("RGB")
         fake_image_paths = sorted(os.listdir(os.path.join(self.cocofake_path, img_id)))
-        fake_images = [
-            Image.open(os.path.join(self.cocofake_path, img_id, x))
-            for x in fake_image_paths
-        ]
+        fake_image = Image.open(os.path.join(self.cocofake_path, img_id, fake_image_paths[0]))
 
         if self.real_transform is not None:
             real_image = self.real_transform(real_image)
         if self.fake_transform is not None:
-            fake_images = [self.fake_transform(x) for x in fake_images]
+            fake_image = self.fake_transform(fake_image)
 
-        #real_image = np.transpose(real_image, (2, 0, 1)).astype(np.float32)
-        #fake_images = [np.transpose(x, (2, 0, 1)).astype(np.float32) for x in fake_images]
-        if len(fake_images) > 5:
-            fake_images = fake_images[0:5]
-
-        return {"real": real_image, "fake": fake_images}
+        return {"real": real_image, "fake": fake_image}
 
 
 def get_cocofake(

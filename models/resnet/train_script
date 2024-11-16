@@ -2,10 +2,10 @@
 #SBATCH -N 1     
 #SBATCH -c 16
 #SBATCH --ntasks-per-node=1
-#SBATCH -t 03:00:00                  
+#SBATCH -t 08:00:00                  
 #SBATCH --gres=gpu:V100:1          
 #SBATCH --mem-per-gpu=32G
-#SBATCH -J resnet18-test    # jobs name
+#SBATCH -J resnet50-test    # jobs name
 #SBATCH -o ./slurm_outs/slurm_%j.out   # file to write logs, prints, etc
 
 module load anaconda3

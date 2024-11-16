@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torchvision.models import resnet18
+from torchvision.models import resnet50
 from torchvision.models.feature_extraction import get_graph_node_names
 from torchvision.models.feature_extraction import create_feature_extractor
 
@@ -13,11 +13,13 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 import sys ; sys.path.append(f"{dir_path}/../..")
 from data.util import get_cocofake
 
-train_nodes, eval_nodes = get_graph_node_names(resnet18())
+import matplotlib.pyplot as plt
+
+train_nodes, eval_nodes = get_graph_node_names(resnet50())
 #print(train_nodes)
 #print(eval_nodes)
 
-class Resnet18FakeDetector(torch.nn.Module):
+class Resnet50FakeDetector(torch.nn.Module):
     def __init__(self, return_nodes, hidden_dim, device, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -25,7 +27,7 @@ class Resnet18FakeDetector(torch.nn.Module):
 
         self.hidden_dim = hidden_dim
 
-        m = resnet18()
+        m = resnet50()
         self.fe = create_feature_extractor(m, return_nodes=return_nodes).to(self.device)
 
         # Dry run to get number of channels for FPN
@@ -37,7 +39,8 @@ class Resnet18FakeDetector(torch.nn.Module):
         self.classification_head = nn.Sequential(
             nn.Linear(self.feat_shape[1], self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(self.hidden_dim, 2)
+            nn.Linear(self.hidden_dim, 1),
+            nn.Sigmoid()
         ).to(device)
 
     
@@ -45,6 +48,12 @@ class Resnet18FakeDetector(torch.nn.Module):
         x = self.fe(x)
         x = self.classification_head(x["feat"])
         return x
+
+def accuracy(pred, target):
+    pred_labels = (pred > 0.5)
+    n = pred.shape[0]
+    acc = (pred_labels == target).sum().item() / n
+    return acc
 
 normalize = v2.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
@@ -70,80 +79,104 @@ if __name__ == "__main__":
     }
     device = "cuda" if torch.cuda.is_available() else "cpu"
     batch_size = 64
-    lr = 0.001
-    epochs = 5
+    lr = 0.01
+    epochs = 15
 
     print(device)
-    model = Resnet18FakeDetector(return_nodes=return_nodes, hidden_dim=128, device=device)
+    model = Resnet50FakeDetector(return_nodes=return_nodes, hidden_dim=1024, device=device)
     train, val, test, = get_cocofake("../../data/coco-2014", "../../data/cocofake",
-                                     train_limit=-1, val_limit=5000, batch_size=batch_size,
+                                     train_limit=-1, val_limit=10000, batch_size=batch_size,
                                      train_transform=train_preprocess,
                                      val_transform=val_preprocess,
                                      train_n_workers=8,
                                      val_n_workers=2
                                     )
-    loss_fn = nn.CrossEntropyLoss()
+    loss_fn = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    train_losses = []
+    val_losses = []
+
+    train_acc = []
+    val_acc = []
     for e in range(epochs):
         running_loss = 0
         train_b_count = 0
+
+        running_train_acc = 0
+        n_points = 0
+        model.train(True)
         for batch in tqdm(train):
             optimizer.zero_grad()
+
+            x = torch.cat([batch["real"], batch["fake"]], dim=0).to(device)
             # pred on real
-            real_out = model(batch["real"].to(device))
+            out = model(x)
+            labels = torch.cat([torch.zeros(batch["real"].shape[0], 1), torch.ones(batch["fake"].shape[0], 1)], dim=0).to(device)
             # gonna make real class 0
             # fake is class 1
-            real_label = torch.Tensor([1, 0])
-            batch_real_labels = real_label.repeat(real_out.shape[0], 1).to(device)
-
-            loss = loss_fn(real_out, batch_real_labels)
-            running_loss += loss
-
-            loss.backward()
-            # pred on fake
-            fake_batch = torch.cat(batch["fake"], dim=0).to(device)
-            fake_out = model(fake_batch)
-
-            # fake is class 1
-            fake_label = torch.Tensor([0,1])
-            batch_fake_labels = fake_label.repeat(fake_out.shape[0], 1).to(device)
-            
-            loss = loss_fn(fake_out, batch_fake_labels)
-
-            running_loss += loss
+            loss = loss_fn(out, labels)
 
             loss.backward()
             optimizer.step()
+
+            with torch.no_grad():
+                running_loss += loss.cpu()
+                running_train_acc += accuracy(out, labels)
+                n_points += out.shape[0]
+
             train_b_count += 1
-        print(f"Train Loss: {running_loss/train_b_count}")
-        torch.save(model.state_dict(), f"checkpoints/resnet18_epoch{e}.pt")
+        avg_train_loss = running_loss/train_b_count
+        avg_train_acc = running_train_acc/n_points
+        train_acc.append(avg_train_acc)
+        train_losses.append(avg_train_loss)
+        print(f"Train Loss: {avg_train_loss}")
+        print(f"Train Accuracy: {avg_train_acc}")
+        torch.save(model.state_dict(), f"checkpoints/resnet50_epoch{e}.pt")
         
 
         model.eval()
         avg_val_loss = 0.0
         val_b_count = 0
+
+        running_val_acc = 0
+        val_n_points = 0
         with torch.no_grad():
             for batch in tqdm(val):
 
-                real_out = model(batch["real"].to(device))
+                x = torch.cat([batch["real"], batch["fake"]], dim=0).to(device)
+                # pred on real
+                out = model(x)
+                labels = torch.cat([torch.zeros(batch["real"].shape[0], 1), torch.ones(batch["fake"].shape[0], 1)], dim=0).to(device)
                 # gonna make real class 0
                 # fake is class 1
-                real_label = torch.Tensor([1, 0])
-                batch_real_labels = real_label.repeat(real_out.shape[0], 1).to(device)
+                val_loss = loss_fn(out, labels)
 
-                val_loss = loss_fn(real_out, batch_real_labels)
-                avg_val_loss += loss
-
-                # pred on fake
-                fake_batch = torch.cat(batch["fake"], dim=0).to(device)
-                fake_out = model(fake_batch)
-
-                # fake is class 1
-                fake_label = torch.Tensor([0,1])
-                batch_fake_labels = fake_label.repeat(fake_out.shape[0], 1).to(device)
-                
-                val_loss = loss_fn(fake_out, batch_fake_labels)
-                avg_val_loss += loss
+                avg_val_loss += loss.cpu()
                 val_b_count += 1
+
+                # compute accuracy stuff
+                running_val_acc += accuracy(out, labels)
+                val_n_points += out.shape[0]
         avg_val_loss /= val_b_count
+        avg_val_acc = running_val_acc/val_n_points
+        val_acc.append(avg_val_acc)
+        val_losses.append(avg_val_loss)
         print(f"Validation Loss: {avg_val_loss}")
+        print(f"Validation Accuracy: {avg_val_acc}")
+    
+    # plot ce loss
+    fig = plt.figure()
+    plt.plot(train_losses, label="Train")
+    plt.plot(val_losses, label="Validation")
+    plt.legend()
+    plt.savefig("figures/resnet18_CE_loss_lc.png")
+
+    # plot acc learning curve
+    fig = plt.figure()
+    plt.plot(train_acc, label="Train")
+    plt.plot(val_acc, label="Validation")
+    plt.legend()
+    plt.savefig("figures/resnet18_acc_lc.png")
+    
+    
