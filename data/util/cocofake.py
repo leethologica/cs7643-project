@@ -50,7 +50,7 @@ class CocoFake(torch.utils.data.Dataset):
         fake_images = [
             np.array(Image.open(os.path.join(self.cocofake_path, img_id, x)))
             for x in fake_image_paths
-        ][:5]
+        ][:self.num_fake]
 
         real_image = torch.tensor(np.transpose(real_image, (2, 0, 1)).astype(np.float32))
         fake_images = [torch.tensor(np.transpose(x, (2, 0, 1)).astype(np.float32)) for x in fake_images]
@@ -58,9 +58,9 @@ class CocoFake(torch.utils.data.Dataset):
         if self.real_transform is not None:
             real_image = self.real_transform(real_image)
         if self.fake_transform is not None:
-            fake_images = [self.fake_transform(x) for x in fake_images][:num_fake]
+            fake_images = [self.fake_transform(x) for x in fake_images]
 
-        if len(fake_images) != 5:
+        if len(fake_images) != self.num_fake:
             print(img_id)
             assert False
         return {"real": real_image, "fake": fake_images}

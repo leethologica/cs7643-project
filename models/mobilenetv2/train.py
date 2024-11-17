@@ -1,9 +1,12 @@
 import os
 import sys ; sys.path.append("../../")
 import torch
+import eco2ai
 import argparse
 import numpy as np
+import pandas as pd
 
+from thop import profile
 from tqdm.auto import tqdm
 from torchvision import models, transforms
 
@@ -50,7 +53,6 @@ def train(
 
             with torch.set_grad_enabled(phase == "train"):
                 for i, batch in tqdm(enumerate(data), total=len(data)):
-                    outputs = None
                     optimizer.zero_grad()
                     gt = []
                     real_images = batch["real"]
@@ -89,12 +91,58 @@ def train(
                         stale += 1
 
 
-def eval(
+def evaluate(
     model,
     data,
-    n_runs: int,
+    device,
+    logfile=None,
+    replace=True,
 ):
-    pass
+    if logfile is not None:
+        if replace and os.path.exists(logfile):
+            os.remove(logfile)
+        tracker = eco2ai.Tracker(
+            project_name=logfile.split(".")[0],
+            alpha_2_code="US",
+            file_name=logfile,
+        )
+        tracker.start()
+    macs = None
+    running_correct = 0
+    total = 0
+    with torch.no_grad():
+        for i, batch in tqdm(enumerate(data), total=len(data)):
+            real_images = batch["real"]
+            real_labels = torch.zeros(real_images.shape[0], dtype=torch.long)
+            fake_images = torch.vstack(batch["fake"])
+            fake_labels = torch.ones(fake_images.shape[0], dtype=torch.long)
+            inputs = torch.cat((real_images, fake_images), dim=0).to(device)
+            labels = torch.cat((real_labels, fake_labels), dim=0).to(device)
+
+            if macs is None:
+                dummy = torch.zeros(batch["real"][0].shape).unsqueeze(0).to(device)
+                macs, n_params = profile(model, inputs=(dummy,))
+
+            idx = torch.randperm(inputs.shape[0])
+            inputs = inputs[idx]
+            labels = labels[idx]
+
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            running_correct += (preds == labels).sum()
+            total += labels.shape[0]
+
+        accuracy = running_correct / total
+        print(f"test accuracy: {accuracy:.04f}")
+        print(f"MACs (M): {macs / 1e6:.04f}")
+        print(f"num params (M): {n_params / 1e6:.04f}")
+
+    if logfile is not None:
+        tracker.stop()
+        df = pd.read_csv(logfile)
+        power = np.array(df["power_consumption(kWh)"]) * 1000
+        print(f"power (w/H): {np.mean(power, axis=0)}")
+
 
 def parse_args():
     argparser = argparse.ArgumentParser(
@@ -109,7 +157,7 @@ def parse_args():
     argparser.add_argument("--eval-only", action="store_true", help="No training")
     argparser.add_argument("--cocopath", type=str, required=True, help="Path to coco-2014")
     argparser.add_argument("--cocofakepath", type=str, required=True, help="Path to cocofake")
-    argparser.add_argument("--savepath", type=str, default="./best_mobilenetv2.pt", help="Path to save model to")
+    argparser.add_argument("--savepath", type=str, default="./artifacts/best_mobilenetv2.pt", help="Path to save model to")
     argparser.add_argument("--train-lim", type=int, default=-1, help="Maximum number of training samples to use")
     argparser.add_argument("--val-lim", type=int, default=-1, help="Maximum number of validation samples to use")
     argparser.add_argument("--num-fake", type=int, default=5, help="Number of fake images to include per real image, between 1 and 5")
@@ -123,7 +171,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    if os.path.exists(args.savepath):
+    if not args.eval_only and os.path.exists(args.savepath):
         response = input(f"File already exists at {args.savepath}. Overwrite? (y/n) ")
         if response.lower()[0] == "n":
             model = torch.load(args.savepath)
@@ -131,7 +179,6 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.gpu}" if args.gpu >= 0 else "cpu")
 
-    #model = torch.hub.load("pytorch/vision", "mobilenet_v2", pretrained=True).to(device)
     model = models.mobilenet_v2(pretrained=True)
     model.classifier[1] = torch.nn.Linear(in_features=model.classifier[1].in_features, out_features=2)
     model = model.to(device)
@@ -145,7 +192,6 @@ if __name__ == "__main__":
         args.cocopath, args.cocofakepath, train_limit=args.train_lim, val_limit=args.val_lim,
         real_transform=real_transform, batch_size=args.batch, train_n_workers=8, val_n_workers=2, num_fake=args.num_fake
     )
-
     #criterion = torch.nn.BCELoss()
     criterion = torch.nn.CrossEntropyLoss()
     if not args.eval_only:
@@ -162,4 +208,10 @@ if __name__ == "__main__":
             device=device,
         )
 
+    evaluate(
+        torch.load(args.savepath).to(device),
+        data=test_data,
+        device=device,
+        logfile=args.savepath.replace(".pt", ".csv"),
+    )
 

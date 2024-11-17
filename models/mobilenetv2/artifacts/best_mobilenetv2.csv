@@ -1,0 +1,2 @@
+id,project_name,experiment_description,epoch,start_time,duration(s),power_consumption(kWh),CO2_emissions(kg),CPU_name,GPU_name,OS,region/country,cost
+21c43385-4e46-4796-9b7f-216b4bcf63d7,,no experiment description,N/A,2024-11-17 17:43:58,75.76112818717957,0.002355129638776473,0.0008703876157322601,"Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz/1 device(s), TDP:210.0",Tesla T4 1 device(s),Linux,US,0
