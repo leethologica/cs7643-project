@@ -39,8 +39,7 @@ class Resnet50FakeDetector(torch.nn.Module):
         self.classification_head = nn.Sequential(
             nn.Linear(self.feat_shape[1], self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(self.hidden_dim, 1),
-            nn.Sigmoid()
+            nn.Linear(self.hidden_dim, 1)
         ).to(device)
 
     
@@ -50,6 +49,7 @@ class Resnet50FakeDetector(torch.nn.Module):
         return x
 
 def accuracy(pred, target):
+    pred = nn.functional.sigmoid(pred)
     pred_labels = (pred > 0.5)
     n = pred.shape[0]
     acc = (pred_labels == target).sum().item() / n
@@ -79,19 +79,19 @@ if __name__ == "__main__":
     }
     device = "cuda" if torch.cuda.is_available() else "cpu"
     batch_size = 64
-    lr = 0.01
-    epochs = 15
+    lr = 0.0001
+    epochs = 30
 
     print(device)
     model = Resnet50FakeDetector(return_nodes=return_nodes, hidden_dim=1024, device=device)
     train, val, test, = get_cocofake("../../data/coco-2014", "../../data/cocofake",
-                                     train_limit=-1, val_limit=10000, batch_size=batch_size,
+                                     train_limit=-1, val_limit=-1, batch_size=batch_size,
                                      train_transform=train_preprocess,
                                      val_transform=val_preprocess,
                                      train_n_workers=8,
                                      val_n_workers=2
                                     )
-    loss_fn = nn.BCELoss()
+    loss_fn = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     train_losses = []
@@ -104,7 +104,6 @@ if __name__ == "__main__":
         train_b_count = 0
 
         running_train_acc = 0
-        n_points = 0
         model.train(True)
         for batch in tqdm(train):
             optimizer.zero_grad()
@@ -123,11 +122,10 @@ if __name__ == "__main__":
             with torch.no_grad():
                 running_loss += loss.cpu()
                 running_train_acc += accuracy(out, labels)
-                n_points += out.shape[0]
 
             train_b_count += 1
         avg_train_loss = running_loss/train_b_count
-        avg_train_acc = running_train_acc/n_points
+        avg_train_acc = running_train_acc/train_b_count
         train_acc.append(avg_train_acc)
         train_losses.append(avg_train_loss)
         print(f"Train Loss: {avg_train_loss}")
@@ -140,7 +138,6 @@ if __name__ == "__main__":
         val_b_count = 0
 
         running_val_acc = 0
-        val_n_points = 0
         with torch.no_grad():
             for batch in tqdm(val):
 
@@ -157,9 +154,8 @@ if __name__ == "__main__":
 
                 # compute accuracy stuff
                 running_val_acc += accuracy(out, labels)
-                val_n_points += out.shape[0]
         avg_val_loss /= val_b_count
-        avg_val_acc = running_val_acc/val_n_points
+        avg_val_acc = running_val_acc/val_b_count
         val_acc.append(avg_val_acc)
         val_losses.append(avg_val_loss)
         print(f"Validation Loss: {avg_val_loss}")
