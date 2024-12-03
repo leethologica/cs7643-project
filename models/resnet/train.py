@@ -1,12 +1,15 @@
 import torch
 import torch.nn as nn
-from torchvision.models import resnet50
-from torchvision.models.feature_extraction import get_graph_node_names
-from torchvision.models.feature_extraction import create_feature_extractor
+from torchvision.models import (resnet18, resnet50, resnet101,
+                                ResNet18_Weights, ResNet50_Weights, ResNet101_Weights
+)
 
 from torchvision.transforms import v2
 
 from tqdm.auto import tqdm
+
+import argparse
+
 import os
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -15,38 +18,49 @@ from data.util import get_cocofake
 
 import matplotlib.pyplot as plt
 
-train_nodes, eval_nodes = get_graph_node_names(resnet50())
-#print(train_nodes)
-#print(eval_nodes)
 
-class Resnet50FakeDetector(torch.nn.Module):
-    def __init__(self, return_nodes, hidden_dim, device, *args, **kwargs):
+class ResnetFakeDetector(torch.nn.Module):
+    def __init__(self, backbone="resnet50", hidden_dim=1024, device="cpu", *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        self.backbone = backbone
+
+        if backbone == "resnet18":
+            resnet = resnet18
+        elif backbone == "resnet50":
+            resnet = resnet50
+        elif backbone == "resnet101":
+            resnet = resnet101
+        else:
+            self.backbone = "resnet50"
+            print(f"backbone \"{backbone}\" not supported! \nUsing resnet50")
+            resnet = resnet50
+            
         self.device = device
 
         self.hidden_dim = hidden_dim
 
-        m = resnet50()
-        self.fe = create_feature_extractor(m, return_nodes=return_nodes).to(self.device)
-
-        # Dry run to get number of channels for FPN
-        inp = torch.randn(1, 3, 224, 224).to(self.device)
-        with torch.no_grad():
-            out = self.fe(inp)
-        self.feat_shape = out["feat"].shape
-
-        self.classification_head = nn.Sequential(
-            nn.Linear(self.feat_shape[1], self.hidden_dim),
+        self.resnet = resnet(weights="DEFAULT").to(self.device)
+        self.resnet.fc = nn.Sequential(
+            nn.Linear(self.resnet.fc.in_features, self.hidden_dim),
             nn.ReLU(),
             nn.Linear(self.hidden_dim, 1)
         ).to(device)
 
-    
     def forward(self, x):
-        x = self.fe(x)
-        x = self.classification_head(x["feat"])
+        x = self.resnet(x)
         return x
+    
+    def get_transforms(self):
+        if self.backbone == "resnet18":
+            return ResNet18_Weights.DEFAULT.transforms
+        elif self.backbone == "resnet50":
+            return ResNet50_Weights.DEFAULT.transforms
+        elif self.backbone == "resnet101":
+            return ResNet101_Weights.DEFAULT.transforms
+        else:
+            return ResNet50_Weights.DEFAULT.transforms
+        
 
 def accuracy(pred, target):
     pred = nn.functional.sigmoid(pred)
@@ -74,16 +88,16 @@ if __name__ == "__main__":
         v2.ToTensor(),
         normalize
     ])
-    return_nodes = {
-        "flatten": "feat"
-    }
+    backbone = "resnet18"
+
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     batch_size = 64
     lr = 0.0001
     epochs = 30
 
     print(device)
-    model = Resnet50FakeDetector(return_nodes=return_nodes, hidden_dim=1024, device=device)
+    model = ResnetFakeDetector(backbone=backbone, hidden_dim=1024, device=device)
     train, val, test, = get_cocofake("../../data/coco-2014", "../../data/cocofake",
                                      train_limit=-1, val_limit=-1, batch_size=batch_size,
                                      train_transform=train_preprocess,
@@ -130,7 +144,7 @@ if __name__ == "__main__":
         train_losses.append(avg_train_loss)
         print(f"Train Loss: {avg_train_loss}")
         print(f"Train Accuracy: {avg_train_acc}")
-        torch.save(model.state_dict(), f"checkpoints/resnet50_epoch{e}.pt")
+        torch.save(model.state_dict(), f"checkpoints/{backbone}_epoch{e}.pt")
         
 
         model.eval()
@@ -166,13 +180,13 @@ if __name__ == "__main__":
     plt.plot(train_losses, label="Train")
     plt.plot(val_losses, label="Validation")
     plt.legend()
-    plt.savefig("figures/resnet18_CE_loss_lc.png")
+    plt.savefig(f"figures/{backbone}_CE_loss_lc.png")
 
     # plot acc learning curve
     fig = plt.figure()
     plt.plot(train_acc, label="Train")
     plt.plot(val_acc, label="Validation")
     plt.legend()
-    plt.savefig("figures/resnet18_acc_lc.png")
+    plt.savefig(f"figures/{backbone}_acc_lc.png")
     
     
