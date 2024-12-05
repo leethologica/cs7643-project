@@ -88,13 +88,13 @@ if __name__ == "__main__":
         v2.ToTensor(),
         normalize
     ])
-    backbone = "resnet18"
+    backbone = "resnet101"
 
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    batch_size = 64
+    batch_size = 32
     lr = 0.0001
-    epochs = 30
+    epochs = 25
 
     print(device)
     model = ResnetFakeDetector(backbone=backbone, hidden_dim=1024, device=device)
