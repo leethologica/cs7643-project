@@ -41,6 +41,7 @@ cocofake_path = '/home/hice1/mtan75/scratch/dlproject/dataset_fake' # Path defin
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Device definition
 
 batch_size = 128 # Defining the batch size for training
+fake_size = batch_size/2
 train_limit = -1 # Training only on a subset of dataset
 val_limit = -1 # Validating only on a subset of validation dataset
 test_split = 0.7 # splitting up the val dataset into val and test
@@ -79,8 +80,8 @@ print('Dataloading/Transformation Completed!')
 ###### PART 3: MODEL BUILDING & EVALUATION ######
 
 # Importing Squeezenets
-# model = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.DEFAULT) # Depends on whether you want pretrained weights or not
-model = models.squeezenet1_1(pretrained=False)
+model = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.DEFAULT) # Depends on whether you want pretrained weights or not
+# model = models.squeezenet1_1(pretrained=False)
 model.num_classes = 2
 
 # Updating the last layer of Squeenet
@@ -107,7 +108,7 @@ def train(model, train_loader, criterion, optimizer, device):
         real_images = batch["real"].to(device)
         real_labels = torch.zeros(real_images.size(0), dtype=torch.long).to(device)
 
-        fake_images = batch["fake"][64:-1].to(device) # This generates a smaller amount of fake images
+        fake_images = batch["fake"][fake_size:-1].to(device) # This generates a smaller amount of fake images
         # fake_images = batch["fake"][-1].unsqueeze(0).to(device) # This generates a smaller amount of fake images. In case you only wants one image
         fake_images = batch["fake"].to(device)
         fake_labels = torch.ones(fake_images.size(0), dtype=torch.long).to(device)
