@@ -46,6 +46,12 @@ class CocoFake(torch.utils.data.Dataset):
         real_image = np.array(Image.open(path))
         if len(real_image.shape) != 3:
             real_image = np.array(Image.open(path).convert("RGB"))
+
+        # Cannot reflect pad if source is too small
+        w, h, c = real_image.shape
+        if w < 512 // 3 or h < 512 // 3:
+            return None
+
         fake_image_paths = sorted(os.listdir(os.path.join(self.cocofake_path, img_id)))
         fake_images = [
             np.array(Image.open(os.path.join(self.cocofake_path, img_id, x)))
@@ -64,6 +70,11 @@ class CocoFake(torch.utils.data.Dataset):
             print(img_id)
             assert False
         return {"real": real_image, "fake": fake_images}
+
+
+def collate(batch):
+    batch = [*filter(lambda x: x is not None, batch)]
+    return torch.utils.data.dataloader.default_collate(batch)
 
 
 def get_cocofake(
@@ -127,9 +138,9 @@ def get_cocofake(
         split="test", limit=val_limit, test_split=test_split, num_fake=num_fake
     )
 
-    train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size, num_workers=train_n_workers)
-    val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size, num_workers=val_n_workers)
-    test_dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, num_workers=val_n_workers)
+    train_dataloader = torch.utils.data.DataLoader(train, batch_size=batch_size, num_workers=train_n_workers, collate_fn=collate)
+    val_dataloader = torch.utils.data.DataLoader(val, batch_size=batch_size, num_workers=val_n_workers, collate_fn=collate)
+    test_dataloader = torch.utils.data.DataLoader(test, batch_size=batch_size, num_workers=val_n_workers, collate_fn=collate)
 
     return train_dataloader, val_dataloader, test_dataloader
 

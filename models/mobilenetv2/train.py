@@ -33,12 +33,13 @@ def train(
     best_model = model.state_dict()
     best_val_loss = np.inf
     stale = 0
-
+    learning_log = []
     for epoch in range(n_epochs):
         if stale > patience:
             print(f"Model validation loss has not improved in {patience} epochs, exiting early.")
             break
 
+        log = []
         for phase in ["train", "val"]:
             if phase == "train":
                 model.train(True)
@@ -81,6 +82,7 @@ def train(
 
                 accuracy = running_correct / total
                 print(f"{phase} avg batch loss: {running_loss / len(data)} | {phase} accuracy: {accuracy}")
+                log.extend([running_loss.item(), accuracy])
                 if phase == "val":
                     if running_loss < best_val_loss:
                         stale = 0
@@ -89,6 +91,10 @@ def train(
                         torch.save(model, savepath)
                     else:
                         stale += 1
+        learning_log.append(log)
+
+    df = pd.DataFrame(learning_log, columns=["train_loss", "train_acc", "val_loss", "val_acc"])
+    return df
 
 
 def evaluate(
@@ -144,6 +150,11 @@ def evaluate(
         print(f"power (w/H): {np.mean(power, axis=0)}")
 
 
+def collate(batch):
+    batch = filter(lambda x: x is not None, batch)
+    return torch.utils.data.dataloader.default_collate(batch)
+
+
 def parse_args():
     argparser = argparse.ArgumentParser(
         "Fine-tune MobileNetV2", formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -179,23 +190,23 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.gpu}" if args.gpu >= 0 else "cpu")
 
-    model = models.mobilenet_v2(pretrained=True)
+    model = models.mobilenet_v2(pretrained=False)
     model.classifier[1] = torch.nn.Linear(in_features=model.classifier[1].in_features, out_features=2)
     model = model.to(device)
 
-    real_transform = lambda x: transforms.Normalize(
+    transform = lambda x: transforms.Normalize(
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225],
-    )(transforms.CenterCrop(512)(x))
+    )(transforms.CenterCrop(512)(transforms.Resize(512)(x)))
 
     train_data, val_data, test_data, = get_cocofake(
         args.cocopath, args.cocofakepath, train_limit=args.train_lim, val_limit=args.val_lim,
-        real_transform=real_transform, batch_size=args.batch, train_n_workers=8, val_n_workers=2, num_fake=args.num_fake
+        real_transform=transform, fake_transform=transform, batch_size=args.batch, train_n_workers=8, val_n_workers=2, num_fake=args.num_fake
     )
     #criterion = torch.nn.BCELoss()
     criterion = torch.nn.CrossEntropyLoss()
     if not args.eval_only:
-        train(
+        df = train(
             model=model,
             train=train_data,
             val=val_data,
@@ -207,6 +218,7 @@ if __name__ == "__main__":
             patience=args.patience,
             device=device,
         )
+        df.to_csv(args.savepath.replace(".pt", "_learning.csv"))
 
     evaluate(
         torch.load(args.savepath).to(device),
