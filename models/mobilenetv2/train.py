@@ -68,8 +68,12 @@ def train(
                     inputs = inputs[idx]
                     labels = labels[idx]
 
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
+                    if isinstance(criterion, torch.nn.BCELoss):
+                        outputs = torch.nn.functional.sigmoid(model(inputs))
+                        loss = criterion(outputs, torch.nn.functional.one_hot(labels).float())
+                    else:
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
                     _, preds = torch.max(outputs, 1)
                     running_correct += (preds == labels).sum().item()
                     total += labels.shape[0]
@@ -173,6 +177,7 @@ def parse_args():
     argparser.add_argument("--val-lim", type=int, default=-1, help="Maximum number of validation samples to use")
     argparser.add_argument("--num-fake", type=int, default=5, help="Number of fake images to include per real image, between 1 and 5")
     argparser.add_argument("--patience", type=int, default=20, help="Number of no-change validation epochs before early stopping")
+    argparser.add_argument("--pretrained", action="store_true", help="Whether to use pretrained weights or not")
     args = argparser.parse_args()
 
     return args
@@ -190,7 +195,10 @@ if __name__ == "__main__":
 
     device = torch.device(f"cuda:{args.gpu}" if args.gpu >= 0 else "cpu")
 
-    model = models.mobilenet_v2(pretrained=False)
+    if args.pretrained:
+        model = models.mobilenet_v2()
+    else:
+        model = models.mobilenet_v2(weights=None)
     model.classifier[1] = torch.nn.Linear(in_features=model.classifier[1].in_features, out_features=2)
     model = model.to(device)
 
@@ -203,8 +211,9 @@ if __name__ == "__main__":
         args.cocopath, args.cocofakepath, train_limit=args.train_lim, val_limit=args.val_lim,
         real_transform=transform, fake_transform=transform, batch_size=args.batch, train_n_workers=8, val_n_workers=2, num_fake=args.num_fake
     )
-    #criterion = torch.nn.BCELoss()
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.BCELoss()
+    #criterion = torch.nn.CrossEntropyLoss()
+    #criterion = torch.nn.BCEWithLogitsLoss()
     if not args.eval_only:
         df = train(
             model=model,
